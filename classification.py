@@ -1,14 +1,12 @@
 # To add a new cell, type '# %%'
 # To add a new markdown cell, type '# %% [markdown]'
-# %%
-from IPython import get_ipython
+
 
 # %% [markdown]
 # # Tuning A Neural Network Using SIF vs KF (Classification Task)
 
 # %%
 # Installing necessary libraries
-# get_ipython().system("pip install filterpy")
 
 # Importing global modules
 from pprint import pformat
@@ -29,7 +27,7 @@ import math
 import os
 import time
 import logging
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import accuracy_score
 from keras.callbacks import Callback
 
 # import matlab.engine
@@ -46,7 +44,7 @@ import utility
 
 
 # %%
-# Tracking of weights by epoch
+# Tracking of weight records of every epochs
 class EpochInfoTracker(Callback):
     def __init__(self):
         self.weights_history = []  # Tracking the weights in each epochs
@@ -56,26 +54,20 @@ class EpochInfoTracker(Callback):
         self.weights_history.append(weights_vec)
 
 
-# Class for keeping the necessary parameters
+# Class for storing the necessary parameters
 class Params:
     pass
 
 
 # %% [markdown]
-# ### Loading Iris Dataset
+# ## Loading Iris Dataset
 
 # %%
-iris = datasets.load_iris()
-
-df = pd.DataFrame(
-    data=np.c_[iris["data"], iris["target"]], columns=iris["feature_names"] + ["target"]
-)
-# Display dataframe information
-# df.head()
+iris = datasets.load_iris()  # Load iris dataset
 
 # Create X and y of dataframe
-X = iris.data[:, :4]
-y = iris.target
+X = iris.data[:, :4]  # X dataset
+y = np.asarray(pd.get_dummies(iris.target))  # y dataset
 
 print("X dataset shape:", X.shape)
 print("y dataset shape:", y.shape)
@@ -91,9 +83,11 @@ print("y_train shape:", y_train.shape)
 print("X_test shape :", X_test.shape)
 print("y_test shape :", y_test.shape)
 
+# %% [markdown]
+# ## Initialize Essential Functions and Parameters for the Algorithm
 
 # %%
-# --------------Initialization of the parameters------------
+# --------------------Initialization of the parameters-----------------
 params = Params()
 params.epochs = 1200
 params.train_series_length = X_train.shape[0]
@@ -114,17 +108,18 @@ params.hxw_model = None
 params.curr_idx = 0
 
 
+# ---------------- Initialization of the necessary functions------------------
 def measurement_func(w, x):
     hxw_model = params.hxw_model
     qq = np.asarray(w)
-    ww = np.reshape(qq, (13))
+    ww = np.reshape(qq, -1)
     set_weights(hxw_model, ww)
     # Reshape needed to feed x as 1 sample to ANN model
     hxw = hxw_model.predict(x.reshape(1, len(x)))
     hxw = hxw.flatten()  # Flatten to make shape = (1,)
 
 
-# Create ukf using pykalman
+# Create ukf using pykalman library
 def create_ukf(Q, R, dt, w_init, P_init):
     M = w_init.shape[0]
 
@@ -139,7 +134,7 @@ def create_ukf(Q, R, dt, w_init, P_init):
     return ukf
 
 
-# Create ukf using ukf.py
+# Create ukf instance using ukf.py (custom ukf)
 def create_my_ukf(Q, R, dt, w_init, P_init):
     my_ukf = ukf.UnscentedKalmanFilter(
         fw, hw, R, Q, w_init, P_init, params.alpha, params.beta, params.kappa
@@ -147,41 +142,29 @@ def create_my_ukf(Q, R, dt, w_init, P_init):
     return my_ukf
 
 
+# Function for Kalman filter
 def fw(w, dt=None):
     return w  # Identity
 
 
+# Function for Kalman filter
 def hw(w):
     x = params.X_data[params.curr_idx]
     hxw = measurement_func(w, x)
     return hxw
 
 
-"""
-# Reshape the dataset as: (batchsize, window_size)
-def prepare_dataset(series, M, stride):
-    X, y = [], []
-    for i in range(0, len(series) - M - 1, stride):
-        window = series[i:(i + M)]  #
-        X.append(window)
-        y.append(series[i + M])
-    return np.array(X), np.array(y)
-"""
-
-
 def evaluate_neural_nets(
     sgd_ann, ukf_ann, window, use_train_series=False, train_series=None
 ):
     if use_train_series:
-        X_data, y_data = params.X_data, params.y_data
+        X_data, y_data = X_train, y_train
         series = train_series
         sample_len = params.train_series_length
         title = "Train series (true vs. predicted)"
     else:
         sample_len = params.test_series_length
-        series = utility.mackey_glass(sample_len=sample_len, tau=params.mg_tau)
-        series = np.array(series[0]).reshape((sample_len))
-        X_data, y_data = prepare_dataset(series, window, stride=1)
+        X_data, y_data = X_test, y_test
         title = "Test series (true vs. predicted)"
 
     sgd_pred, sgd_self_pred = utility.predict_series(
@@ -198,8 +181,8 @@ def evaluate_neural_nets(
     )
     if not use_train_series:
         preds = ukf_ann.predict(X_data)
-        mse = mean_squared_error(y_data, preds)
-        print("The Test MSE is: ", mse)
+        accuracy = accuracy_score(y_data, preds)
+        print("The Test accuracy is: ", accuracy)
 
     # utility.plot(range(sample_len), y_self_pred_series, new_figure=False,
     #              label='Predicted test series (rolling prediction: no true vals used)')
@@ -210,8 +193,9 @@ def create_neural_net(M):
 
     # Build a simple neural network
     ann = Sequential()
-    ann.add(Dense(1, input_dim=M, activation="tanh"))
-    ann.compile(optimizer="sgd", loss="mse")
+    ann.add(Dense(1, input_dim=M, activation="relu"))
+    ann.add(Dense(3, activation="softmax"))
+    ann.compile(optimizer="sgd", loss="categorical_crossentropy", metrics="accuracy")
 
     # Print out the summary of the model
     ann.summary()
@@ -219,6 +203,7 @@ def create_neural_net(M):
     return ann
 
 
+# Get weights of the neural network model
 def get_weights_vector(model):
     weights = model.get_weights()
     # logging.info(weights)
@@ -230,6 +215,7 @@ def get_weights_vector(model):
     return weights_vec
 
 
+# Set weights of the neural network model
 def set_weights(model, weights_vec):
     prev_weights = model.get_weights()
     # logging.info(prev_weights)
@@ -262,14 +248,11 @@ def test_weights_functions():
     logging.info(post_weights)
 
 
+# %% [markdown]
+# ## Main
+
 # %%
 def main():
-    # utility.setup_logging('output')
-    # logging.info('Experiment parameters below')
-    # logging.info('\n{}'.format(pformat(params.__dict__)))
-
-    # test_weights_functions()
-    # assert False
 
     # -------------------------------------------
     # Setting parameters
@@ -282,17 +265,6 @@ def main():
     dt = 0.01  # Setting learning rate
     n_samples = params.train_series_length  # Setting batch size
 
-    # -------------------------------------------
-    # Generating data
-    """
-    X_series = utility.mackey_glass(                                            # Generating the dataset (Mackey Glass)
-        sample_len=n_samples, tau=params.mg_tau, n_samples=window)
-    X_series = np.array(X_series[0]).reshape((n_samples))
-
-    params.X_data, params.y_data = prepare_dataset(X_series, window, stride=1)  # Reshaping dataset for a regression task
-    #params.X_data, params.y_data = xx , yy
-    """
-
     # Create ANN, get its initial weights
     params.hxw_model = create_neural_net(X_train.shape[1])  # Create a neural net model
     w_init = get_weights_vector(params.hxw_model)  # Get weights from neural nets
@@ -301,13 +273,13 @@ def main():
     # ---------------------------Filter Parameters-----------------------
 
     # -----------------UKF Parameter------------------
-    # Initial values of covariance matrix of state variables (MxM)
-    P_init = 0.1 * np.eye(num_weights)
-    # Process noise covariance matrix (MxM)
-    Q = params.Q_var * np.eye(num_weights)
+    P_init = 0.1 * np.eye(
+        num_weights
+    )  # Initial values of covariance matrix of state variables (MxM)
+    Q = params.Q_var * np.eye(num_weights)  # Process noise covariance matrix (MxM)
     R = np.array([[params.R_var]])  # Measurement noise covariance matrix (DxD)
 
-    sgd_ann = create_neural_net(X_train.shape[1])
+    sgd_ann = create_neural_net(X_train.shape[1])  # Create neural network model
     # Same starting point as the UKF_ANN
     sgd_ann.set_weights(params.hxw_model.get_weights())
 
@@ -327,11 +299,11 @@ def main():
     # Pre-allocate output variables
     ukf_w = np.zeros((num_weights, params.epochs))
     my_ukf_w = np.zeros((num_weights, params.epochs))
-    ukf_train_mse = np.zeros(params.epochs)
-    my_ukf_train_mse = np.zeros(params.epochs)
+    ukf_train_accuracy = np.zeros(params.epochs)
+    my_ukf_train_accuracy = np.zeros(params.epochs)
     sgd_train_mse = np.zeros(params.epochs)
 
-    # SIF Initalize Variables
+    # -----------SIF Initalize Variables--------------
     x = w_init
     n = x.shape[0]  # Number of States
     m = z_true_series.shape[0]
@@ -366,6 +338,8 @@ def main():
     # num_iter = 10 #hack
     minval = np.ones((num_iter, 1))
     aRate = 0.5
+
+    # Epochs * len(y_train)
     for i in range(num_iter):
         # print("SHOUD", mean_squared_error(z_true_series, ukf_ann.predict(params.X_data)))
         idx = i % len(z_true_series)
@@ -373,30 +347,33 @@ def main():
         if 0 == 0:
             if not params.train_ukf_ann:
                 break
+            # Checking the accuracy of the model
+            preds_softmax = ukf_ann.predict(X_train)
 
-            preds = ukf_ann.predict(X_train)
-            mse = mean_squared_error(z_true_series, preds)
-            ukf_train_mse[epoch] = mse
-            my_ukf_train_mse[epoch] = mse
-            sifnn.append(mse)
-            print("The MSE is: ", mse)
-            if mse <= 0.01 and i > 10:
+            z_true_series_accuracy = np.argmax(z_true_series, axis=1)
+            preds_accuracy = np.argmax(
+                preds_softmax, axis=1
+            )  # Take the highest possibility as output among softmax output
+            accuracy = accuracy_score(z_true_series_accuracy, preds_accuracy)
+
+            ukf_train_accuracy[epoch] = accuracy
+            my_ukf_train_accuracy[epoch] = accuracy
+            sifnn.append(accuracy)
+            print("The accuracy is: ", accuracy)
+            if (accuracy >= 0.8) and (i > 1):
                 thelast = i
                 break
             # ukf_w[:, epoch] = x[:]
             # my_ukf_w[:, epoch] = x[:]
 
             epoch += 1
-            # logging.info('Epoch: {} / {}'.format(epoch, params.epochs))
 
         # -----------------Genetic Algorithm------------
-        geneticMSE = []
-        geneticWeights = []
+        accuracy_GA = []
+        weights_GA = []
         for jj in range(100):
-            geneticWeights.append(
-                get_weights_vector(ukf_ann)
-            )  # Store the weights vector
-            geneticMSE.append(mse)  # Store the MSE values
+            weights_GA.append(get_weights_vector(ukf_ann))  # Store the weights vector
+            accuracy_GA.append(accuracy)  # Store the accuracy values
             params.curr_idx = (
                 idx  # For use in hw() to fetch correct x_k sample            #
             )
@@ -404,23 +381,17 @@ def main():
 
             ##################################################
             # SIF Predicition Stage
-            # Learning Rate at 0.01
+            predict_genetic = ukf_ann.predict(
+                X_train
+            )  # Perform the prediction with given weights
+            predict_genetic = np.max(
+                predict_genetic, axis=1
+            )  # Select the highest softmax output
+            z_max = np.max(z_true_series, axis=1)
 
-            # error = mean_squared_error(z_true_series, preds)
-            # gradient = x.T * error / preds.shape[0]
-            # w = w - eta * gradient
-
-            # ukf_filter.predict()
-
-            # 1*get_weights_vector(ukf_ann) + 0.01#ukf_filter.x # + 0.01 * w
-
-            # print("WW  ", z_true_series.shape, x.shape)
-            # pdb.set_trace()
-            innov = z_true_series - np.reshape(
-                ukf_ann.predict(X_train), z_true_series.shape
-            )
+            innov = z_max - predict_genetic
             x = get_weights_vector(ukf_ann) + aRate * np.sign(
-                z_true_series[idx] - ukf_ann.predict(X_train)[idx]
+                z_max[idx] - predict_genetic[idx]
             )
             # innov = z_true_series - np.dot(C,x)
             # print("Innov ", innov)
@@ -438,7 +409,9 @@ def main():
 
             pinvC = np.linalg.pinv(C)
             K = np.dot(pinvC, sat)
-            x = np.asarray([xx * random.uniform(0.001, 1) for xx in x])
+            x = np.asarray(
+                [xx * random.uniform(0.001, 1) for xx in x]
+            )  # Randomly initialize weights
             # print(x.shape, K.shape, innovA.shape, x.shape, np.dot(K, innovA).shape)
             was = np.reshape(np.dot(K, innov), x.shape)
             x = x + was  # NEED TO CHECK THIS LINE
@@ -448,27 +421,30 @@ def main():
 
             set_weights(params.hxw_model, x)
             set_weights(ukf_ann, x)
+
             preds = ukf_ann.predict(X_train)
-            mse = mean_squared_error(z_true_series, preds)
-            print("MSEN: ", mse)
-            minval[idx] = mse
-            pdiff[idx] = mse
-            # if mse <= 0.03:
+            preds = np.argmax(preds, axis=1)
+            accuracy = accuracy_score(z_true_series_accuracy, preds)
+
+            # print("Accuracy: ", accuracy)
+            minval[idx] = accuracy
+            pdiff[idx] = accuracy
+            # if accuracy <= 0.03:
             #   break
             # ukf_filter.x = x
-            print(type(preds))
-            geneticMSE.append(mse)
-            geneticWeights.append(x)
-            print(geneticMSE)
+            # print(type(preds))
+            accuracy_GA.append(accuracy)
+            weights_GA.append(x)
+            # print(accuracy_GA)
 
             # Genetic Algorithm
             if jj == 99:
-                print(geneticMSE[geneticMSE.index(min(geneticMSE))])
+                # print(accuracy_GA[accuracy_GA.index(min(accuracy_GA))])
 
-                set_weights(ukf_ann, geneticWeights[geneticMSE.index(min(geneticMSE))])
+                set_weights(ukf_ann, weights_GA[accuracy_GA.index(max(accuracy_GA))])
                 preds = ukf_ann.predict(X_train)
                 #     print("Last Set: ", mean_squared_error(z_true_series, preds))
-                set_weights(ukf_ann, geneticWeights[geneticMSE.index(min(geneticMSE))])
+                set_weights(ukf_ann, weights_GA[accuracy_GA.index(max(accuracy_GA))])
         #     print("jjj",mean_squared_error(z_true_series, ukf_ann.predict(params.X_data) ))
 
     time_to_train = time.time() - t0
@@ -478,39 +454,43 @@ def main():
         )
     )
 
-    # -------------------------------------------
-    # Results analysis
-
-    # Visualize evolution of ANN weights
-
-    # Visualize error curve (SGD vs UKF)
-    x_var = range(thelast + 1)
-    hist = history.history["loss"]
-    ukf_train_mse = np.array(sifnn)
-    # utility.plot(x_var, hist, xlabel='Epoch',
-    #            label='SGD ANN training history (MSE)')
-    utility.plot(
-        x_var, ukf_train_mse, new_figure=False, label="SIF ANN training history (MSE)"
-    )
-
-    # True test series vs. ANN pred vs, UKF pred
-    logging.info("Evaluating and visualizing neural net predictions")
-    evaluate_neural_nets(
-        sgd_ann, ukf_ann, window, use_train_series=True, train_series=X_series
-    )
-    evaluate_neural_nets(sgd_ann, ukf_ann, window)
-
-    utility.save_all_figures("output")
-    plt.show()
-
-    print("The Min MSE is ", min(minval), " vs ", hist[-1])
-    print("Total amount of epochs for SIF: ", epoch)
-
 
 if __name__ == "__main__":
     # os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # This line disables GPU
     main()
 
+# %% [markdown]
+# ## Result Analysis
 
 # %%
+# -------------------------------------------
+# Results analysis
+
+# Visualize evolution of ANN weights
+
+# Visualize error curve (SGD vs UKF)
+x_var = range(thelast + 1)
+hist = history.history["loss"]
+ukf_train_accuracy = np.array(sifnn)
+# utility.plot(x_var, hist, xlabel='Epoch',
+#            label='SGD ANN training history (accuracy)')
+utility.plot(
+    x_var,
+    ukf_train_accuracy,
+    new_figure=False,
+    label="SIF ANN training history (accuracy)",
+)
+
+# True test series vs. ANN pred vs, UKF pred
+logging.info("Evaluating and visualizing neural net predictions")
+evaluate_neural_nets(
+    sgd_ann, ukf_ann, window, use_train_series=True, train_series=X_series
+)
+evaluate_neural_nets(sgd_ann, ukf_ann, window)
+
+utility.save_all_figures("output")
+plt.show()
+
+print("The Min accuracy is ", min(minval), " vs ", hist[-1])
+print("Total amount of epochs for SIF: ", epoch)
 
