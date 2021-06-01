@@ -1,6 +1,7 @@
 # To add a new cell, type '# %%'
 # To add a new markdown cell, type '# %% [markdown]'
-
+# %%
+from IPython import get_ipython
 
 # %% [markdown]
 # # Tuning A Neural Network Using SIF vs KF (Classification Task)
@@ -252,6 +253,8 @@ def test_weights_functions():
 # ## Main
 
 # %%
+
+
 def main():
 
     # -------------------------------------------
@@ -261,9 +264,8 @@ def main():
     # No. of state variables = no. of weights in neural net
     # No. of measurement variables = D = 1 (y)
 
-    # window = params.window_size  # Setting window size
     dt = 0.01  # Setting learning rate
-    n_samples = params.train_series_length  # Setting batch size
+    n_samples = params.train_series_length  # Setting training series length
 
     # Create ANN, get its initial weights
     params.hxw_model = create_neural_net(X_train.shape[1])  # Create a neural net model
@@ -280,19 +282,24 @@ def main():
     R = np.array([[params.R_var]])  # Measurement noise covariance matrix (DxD)
 
     sgd_ann = create_neural_net(X_train.shape[1])  # Create neural network model
-    # Same starting point as the UKF_ANN
-    sgd_ann.set_weights(params.hxw_model.get_weights())
+    sgd_ann.set_weights(
+        params.hxw_model.get_weights()
+    )  # Set the weights for neural network (Same starting point as the UKF_ANN)
 
-    ukf_ann = create_neural_net(X_train.shape[1])
+    ukf_ann = create_neural_net(X_train.shape[1])  # Create neural network for ukf
     testann = create_neural_net(X_train.shape[1])
 
-    # Same starting point as the UKF_ANN
-    ukf_ann.set_weights(params.hxw_model.get_weights())
+    ukf_ann.set_weights(
+        params.hxw_model.get_weights()
+    )  # Set the ukf weighst same as sgd_nn (Same starting point as the UKF_ANN)
 
-    z_true_series = y_train
-    num_iter = params.epochs * len(z_true_series)
+    z_true_series = y_train  # Set the test set as the training set
+    num_iter = params.epochs * len(
+        z_true_series
+    )  # Initialize max_iteration: epochs * dataset_len
 
     # 2 Kalman filter implementations to compare (from filterpy and my custom impl)
+
     ukf_filter = create_ukf(Q, R, dt, w_init, P_init)  # Initialization of the UKF
     my_ukf = create_my_ukf(Q, R, dt, w_init, P_init)  # Initialiation of the SIF
 
@@ -304,7 +311,7 @@ def main():
     sgd_train_mse = np.zeros(params.epochs)
 
     # -----------SIF Initalize Variables--------------
-    x = w_init
+    x = w_init  # Weights of the neural network
     n = x.shape[0]  # Number of States
     m = z_true_series.shape[0]
     # delta = [[0.09], [9], [0.9]]
@@ -348,16 +355,21 @@ def main():
             if not params.train_ukf_ann:
                 break
             # Checking the accuracy of the model
-            preds_softmax = ukf_ann.predict(X_train)
-
-            z_true_series_accuracy = np.argmax(z_true_series, axis=1)
+            preds_softmax = ukf_ann.predict(
+                X_train
+            )  # Model prediction (softmax format)
+            z_true_series_accuracy = np.argmax(
+                z_true_series, axis=1
+            )  # Select the highest probability as the output
             preds_accuracy = np.argmax(
                 preds_softmax, axis=1
             )  # Take the highest possibility as output among softmax output
-            accuracy = accuracy_score(z_true_series_accuracy, preds_accuracy)
+            accuracy = accuracy_score(
+                z_true_series_accuracy, preds_accuracy
+            )  # Calculate the accuracy
 
             ukf_train_accuracy[epoch] = accuracy
-            my_ukf_train_accuracy[epoch] = accuracy
+            # my_ukf_train_accuracy[epoch] = accuracy
             sifnn.append(accuracy)
             print("The accuracy is: ", accuracy)
             if (accuracy >= 0.8) and (i > 1):
@@ -374,9 +386,7 @@ def main():
         for jj in range(100):
             weights_GA.append(get_weights_vector(ukf_ann))  # Store the weights vector
             accuracy_GA.append(accuracy)  # Store the accuracy values
-            params.curr_idx = (
-                idx  # For use in hw() to fetch correct x_k sample            #
-            )
+            params.curr_idx = idx  # For use in hw() to fetch correct x_k sample
             z = z_true_series[idx]
 
             ##################################################
@@ -389,7 +399,7 @@ def main():
             )  # Select the highest softmax output
             z_max = np.max(z_true_series, axis=1)
 
-            innov = z_max - predict_genetic
+            innov = z_max - predict_genetic  # Set the innovation matrix
             x = get_weights_vector(ukf_ann) + aRate * np.sign(
                 z_max[idx] - predict_genetic[idx]
             )
@@ -398,6 +408,7 @@ def main():
 
             ### Do something with delta
 
+            # sat: saturation term
             ############## CHANGE #################
             for i in range(1, m):
                 # innovA[i] = sum(innov[i])/len(innov[i])
@@ -471,14 +482,11 @@ if __name__ == "__main__":
 # Visualize error curve (SGD vs UKF)
 x_var = range(thelast + 1)
 hist = history.history["loss"]
-ukf_train_accuracy = np.array(sifnn)
+ukf_train_mse = np.array(sifnn)
 # utility.plot(x_var, hist, xlabel='Epoch',
-#            label='SGD ANN training history (accuracy)')
+#            label='SGD ANN training history (MSE)')
 utility.plot(
-    x_var,
-    ukf_train_accuracy,
-    new_figure=False,
-    label="SIF ANN training history (accuracy)",
+    x_var, ukf_train_mse, new_figure=False, label="SIF ANN training history (MSE)"
 )
 
 # True test series vs. ANN pred vs, UKF pred
@@ -491,6 +499,78 @@ evaluate_neural_nets(sgd_ann, ukf_ann, window)
 utility.save_all_figures("output")
 plt.show()
 
-print("The Min accuracy is ", min(minval), " vs ", hist[-1])
+print("The Min MSE is ", min(minval), " vs ", hist[-1])
 print("Total amount of epochs for SIF: ", epoch)
+
+# %% [markdown]
+# ## SIF (Step by step)
+
+# %%
+dt = 0.01  # Setting learning rate
+n_samples = params.train_series_length  # Setting batch size
+
+# Create ANN, get its initial weights
+params.hxw_model = create_neural_net(X_train.shape[1])  # Create a neural net model
+w_init = get_weights_vector(params.hxw_model)  # Get weights from neural nets
+num_weights = w_init.shape[0]  # Number of weights inside the neural network
+
+ukf_ann = create_neural_net(X_train.shape[1])
+
+z_true_series = y_train
+
+num_iter = params.epochs * len(z_true_series)
+
+
+# %%
+# -----------SIF Initalize Variables--------------
+x = w_init
+n = x.shape[0]  # Number of States
+m = z_true_series.shape[0]
+# delta = [[0.09], [9], [0.9]]
+delta = np.random.uniform(low=0.0009, high=0.9, size=(X_train.shape[0]))
+sat = np.zeros((m, m))
+C = np.ones((X_train.shape[0], n))
+# P = P_init
+innovA = np.zeros((m, 1))
+
+N = len(x)
+w = np.zeros((x.shape))
+eta = 0.01
+x = get_weights_vector(ukf_ann)
+pdiff = np.zeros((num_iter, 1))
+
+
+# %%
+logging.info("Training neural net with SGD")
+info_tracker = EpochInfoTracker()
+callbacks = [info_tracker]
+history = ukf_ann.fit(
+    X_train, y_train, batch_size=1, epochs=1, verbose=3, callbacks=callbacks,
+)
+
+
+# %%
+preds_softmax = ukf_ann.predict(X_train)
+
+
+z_true_series_accuracy = np.argmax(z_true_series, axis=1)
+preds_accuracy = np.argmax(
+    preds_softmax, axis=1
+)  # Take the highest possibility as output among softmax output
+accuracy = accuracy_score(z_true_series_accuracy, preds_accuracy)
+print(accuracy)
+
+# %% [markdown]
+# ## Prediction Stage
+#
+# predicted innovation $ \hat{z}_{k+1|k} $: pred_innov
+#
+#
+
+# %%
+preds_softmax = ukf_ann.predict(X_train)
+predict_genetic = np.max(predict_genetic, axis=1)  # Select the highest softmax output
+z_max = np.max(z_true_series, axis=1)
+
+pred_innov = z_max - predict_genetic
 
