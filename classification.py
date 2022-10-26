@@ -375,8 +375,6 @@ def main():
             if (accuracy >= 0.8) and (i > 1):
                 thelast = i
                 break
-            # ukf_w[:, epoch] = x[:]
-            # my_ukf_w[:, epoch] = x[:]
 
             epoch += 1
 
